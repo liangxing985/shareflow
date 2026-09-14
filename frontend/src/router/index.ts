@@ -73,6 +73,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Users',
         component: () => import('@/views/users/UserList.vue'),
         meta: { title: '用户管理', icon: 'Avatar', roles: ['admin'] }
+      },
+      {
+        path: 'system-config',
+        name: 'SystemConfig',
+        component: () => import('@/views/system/SystemConfig.vue'),
+        meta: { title: '系统配置', icon: 'Tools', roles: ['admin', 'manager'] }
       }
     ]
   },

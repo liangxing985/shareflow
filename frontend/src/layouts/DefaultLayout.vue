@@ -88,7 +88,8 @@ const menuItems = [
   { path: '/settlements', title: '结算管理', icon: 'Money' },
   { path: '/payment-accounts', title: '收款账户', icon: 'Wallet' },
   { path: '/reconciliations', title: '对账管理', icon: 'DocumentChecked' },
-  { path: '/users', title: '用户管理', icon: 'Avatar', roles: ['admin'] }
+  { path: '/users', title: '用户管理', icon: 'Avatar', roles: ['admin'] },
+  { path: '/system-config', title: '系统配置', icon: 'Tools', roles: ['admin', 'manager'] }
 ]
 
 const visibleMenuItems = computed(() => {

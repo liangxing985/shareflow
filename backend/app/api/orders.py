@@ -16,6 +16,7 @@ from app.schemas.common import PageResponse
 from app.dependencies import get_current_user
 from app.services.share_service import ShareEngine
 from app.services.notify_service import notify_service
+from app.services.system_config_service import system_config_service
 from app.core.audit_log import log_operation
 from app.config import settings
 
@@ -461,7 +462,15 @@ async def admin_confirm_payment(
     await db.refresh(order)
 
     # 确认收款后，后台异步发送支付回调通知到业务系统
-    if settings.PAYMENT_NOTIFY_URL:
+    # 从数据库读取配置（优先使用数据库配置，没有则用.env默认值）
+    db_notify_url = await system_config_service.get_config(db, "payment_notify_url", settings.PAYMENT_NOTIFY_URL)
+    db_app_id = await system_config_service.get_config(db, "payment_app_id", settings.PAYMENT_APP_ID)
+    db_api_keys_str = await system_config_service.get_config(db, "api_keys", settings.API_KEYS)
+    db_api_key = None
+    if db_api_keys_str:
+        db_api_key = str(db_api_keys_str).split(",")[0].strip()
+
+    if db_notify_url:
         try:
             # 预提取订单数据，避免后台任务访问detached的SQLAlchemy对象
             order_data = {
@@ -471,8 +480,13 @@ async def admin_confirm_payment(
                 "paid_at": order.paid_at.strftime("%Y-%m-%d %H:%M:%S") if order.paid_at else "",
                 "transaction_id": str(order.transaction_id or ""),
             }
-            notify_service.send_payment_notify_background(order_data)
-            logger.info(f"订单 {order.order_no} 已触发支付回调通知")
+            notify_service.send_payment_notify_background(
+                order_data,
+                notify_url=db_notify_url,
+                api_key=db_api_key,
+                app_id=str(db_app_id)
+            )
+            logger.info(f"订单 {order.order_no} 已触发支付回调通知 -> {db_notify_url}")
         except Exception as e:
             logger.error(f"订单 {order.order_no} 触发支付回调失败: {str(e)[:200]}")
 

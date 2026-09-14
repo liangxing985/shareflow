@@ -7,7 +7,7 @@ import os
 class Settings(BaseSettings):
     # 应用
     APP_NAME: str = "ShareFlow 分账系统"
-    APP_VERSION: str = "1.3.1"
+    APP_VERSION: str = "1.4.0"
     DEBUG: bool = False
     ENV: str = "production"  # production / development
 

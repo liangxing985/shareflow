@@ -66,7 +66,8 @@ class NotifyService:
     async def send_payment_notify(
         order_data: dict,
         notify_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        app_id: Optional[str] = None
     ) -> bool:
         """
         发送支付成功回调通知
@@ -91,9 +92,12 @@ class NotifyService:
         if not key:
             logger.warning(f"订单 {order_data.get('order_no')} 未配置API Key，回调不签名")
 
+        # 确定app_id
+        payment_app_id = app_id or settings.PAYMENT_APP_ID
+
         # 构造回调参数（只包含必要字段，不暴露内部财务数据）
         params = {
-            "app_id": settings.PAYMENT_APP_ID,
+            "app_id": payment_app_id,
             "order_no": order_data["order_no"],
             "out_order_no": order_data["out_order_no"],
             "total_amount": order_data["total_amount"],
@@ -160,7 +164,8 @@ class NotifyService:
     def send_payment_notify_background(
         order_data: dict,
         notify_url: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        app_id: Optional[str] = None
     ):
         """
         后台发送支付回调（不阻塞主流程）
@@ -171,7 +176,7 @@ class NotifyService:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 loop.create_task(
-                    NotifyService.send_payment_notify(order_data, notify_url, api_key)
+                    NotifyService.send_payment_notify(order_data, notify_url, api_key, app_id)
                 )
             else:
                 # 如果没有运行中的事件循环，用新线程执行
@@ -180,7 +185,7 @@ class NotifyService:
                     new_loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(new_loop)
                     new_loop.run_until_complete(
-                        NotifyService.send_payment_notify(order_data, notify_url, api_key)
+                        NotifyService.send_payment_notify(order_data, notify_url, api_key, app_id)
                     )
                     new_loop.close()
                 threading.Thread(target=run_in_thread, daemon=True).start()

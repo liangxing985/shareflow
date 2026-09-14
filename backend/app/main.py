@@ -7,8 +7,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, AsyncSessionLocal
 from app.api import api_router
+from app.services.system_config_service import system_config_service
 
 
 @asynccontextmanager
@@ -22,6 +23,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"{settings.APP_NAME} 启动中...")
     await init_db()
     logger.info("数据库初始化完成")
+
+    # 初始化系统默认配置
+    try:
+        async with AsyncSessionLocal() as db:
+            await system_config_service.init_default_configs(db)
+        logger.info("系统配置初始化完成")
+    except Exception as e:
+        logger.error(f"系统配置初始化失败: {e}")
+
     logger.info(f"{settings.APP_NAME} 启动完成，版本: {settings.APP_VERSION}")
     yield
     logger.info(f"{settings.APP_NAME} 关闭")

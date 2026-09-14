@@ -16,6 +16,7 @@ from app.models.order import Order
 from app.models.payment_account import PaymentAccount
 from app.core.signature import verify_sign_with_keys
 from app.core.audit_log import log_operation
+from app.services.system_config_service import system_config_service
 
 router = APIRouter(prefix="/payment", tags=["支付对接"])
 
@@ -109,17 +110,27 @@ async def payment_create(
     if not valid:
         return {"code": -1, "msg": error_msg, "data": None}
 
+    # 从数据库读取支付配置（优先使用数据库配置，没有则用.env默认值）
+    db_app_id = await system_config_service.get_config(db, "payment_app_id", settings.PAYMENT_APP_ID)
+    db_api_keys_str = await system_config_service.get_config(db, "api_keys", settings.API_KEYS)
+    db_sign_enabled = await system_config_service.get_config(db, "payment_sign_enabled", settings.PAYMENT_SIGN_ENABLED)
+
+    # 解析API Key列表
+    db_api_keys = []
+    if db_api_keys_str:
+        db_api_keys = [k.strip() for k in str(db_api_keys_str).split(",") if k.strip()]
+
     # 签名验证
-    if settings.PAYMENT_SIGN_ENABLED:
-        if not settings.api_keys_list:
+    if db_sign_enabled:
+        if not db_api_keys:
             return {"code": -1, "msg": "服务器未配置API Key", "data": None}
-        if not verify_sign_with_keys(params, settings.api_keys_list):
+        if not verify_sign_with_keys(params, db_api_keys):
             logger.warning(f"支付创建签名验证失败，IP: {client_ip}")
             return {"code": -1, "msg": "签名验证失败", "data": None}
 
     # 校验app_id
-    if str(params.get("app_id")) != settings.PAYMENT_APP_ID:
-        return {"code": -1, "msg": f"app_id不匹配", "data": None}
+    if str(params.get("app_id")) != str(db_app_id):
+        return {"code": -1, "msg": "app_id不匹配", "data": None}
 
     # 校验金额（用Decimal，避免float精度问题）
     try:

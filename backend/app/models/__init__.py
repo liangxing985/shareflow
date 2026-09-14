@@ -10,6 +10,7 @@ from app.models.share_balance import ShareBalance
 from app.models.settlement import Settlement
 from app.models.reconciliation import Reconciliation
 from app.models.operation_log import OperationLog
+from app.models.system_config import SystemConfig
 
 __all__ = [
     "Base",
@@ -23,4 +24,5 @@ __all__ = [
     "Settlement",
     "Reconciliation",
     "OperationLog",
+    "SystemConfig",
 ]
