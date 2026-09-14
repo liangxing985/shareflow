@@ -12,8 +12,9 @@ services:
       MYSQL_USER: ${MYSQL_USER:-shareflow}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-shareflow123}
       TZ: Asia/Shanghai
-    ports:
-      - "${MYSQL_PORT:-3306}:3306"
+    # 不映射宿主机端口，只在容器内部网络通信（避免与服务器已有MySQL冲突）
+    # ports:
+    #   - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
@@ -27,8 +28,9 @@ services:
     image: redis:7-alpine
     container_name: shareflow-redis
     restart: always
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # 不映射宿主机端口，只在容器内部网络通信（避免与服务器已有Redis冲突）
+    # ports:
+    #   - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
