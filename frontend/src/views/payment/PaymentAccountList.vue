@@ -49,8 +49,8 @@
         <el-form-item label="账号">
           <el-input v-model="form.account_no" placeholder="微信号/支付宝账号" />
         </el-form-item>
-        <el-form-item label="收款码URL" v-if="form.platform !== 'bank'">
-          <el-input v-model="form.qr_code_url" placeholder="收款码图片地址" />
+        <el-form-item label="收款码" v-if="form.platform !== 'bank'">
+          <ImageUpload v-model="form.qr_code_url" />
         </el-form-item>
         <template v-if="form.platform === 'bank'">
           <el-form-item label="开户银行">
@@ -80,6 +80,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getPaymentAccounts, createPaymentAccount, updatePaymentAccount, deletePaymentAccount } from '@/api/paymentAccounts'
+import ImageUpload from '@/components/ImageUpload.vue'
 
 const loading = ref(false)
 const saving = ref(false)

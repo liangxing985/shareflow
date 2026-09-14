@@ -127,6 +127,9 @@
         <el-form-item label="备注">
           <el-input v-model="transferForm.remark" type="textarea" :rows="2" />
         </el-form-item>
+        <el-form-item label="转账凭证">
+          <ImageUpload v-model="transferForm.transfer_voucher_url" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="transferDialogVisible = false">取消</el-button>
@@ -150,6 +153,9 @@
           <el-descriptions-item label="转账时间">{{ currentSettlement.transferred_at ? currentSettlement.transferred_at.substring(0, 19).replace('T', ' ') : '-' }}</el-descriptions-item>
           <el-descriptions-item label="确认时间">{{ currentSettlement.confirmed_at ? currentSettlement.confirmed_at.substring(0, 19).replace('T', ' ') : '-' }}</el-descriptions-item>
           <el-descriptions-item label="备注">{{ currentSettlement.remark || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="转账凭证" v-if="currentSettlement.transfer_voucher_url">
+            <el-image :src="currentSettlement.transfer_voucher_url" :preview-src-list="[currentSettlement.transfer_voucher_url]" fit="contain" style="width: 150px; height: 150px; border: 1px solid #eee; border-radius: 4px;" />
+          </el-descriptions-item>
         </el-descriptions>
 
         <h4 style="margin: 20px 0 12px">分账明细（{{ currentSettlement.share_records?.length || 0 }}笔）</h4>
@@ -171,6 +177,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Grid, Download } from '@element-plus/icons-vue'
 import { getSettlements, createSettlement, batchCreateSettlements, markTransferred, confirmSettlement as apiConfirm, cancelSettlement as apiCancel, exportTransferList as apiExport, getSettlementStats } from '@/api/settlements'
 import { getShareholdersWithBalance } from '@/api/shareholders'
+import ImageUpload from '@/components/ImageUpload.vue'
 
 const loading = ref(false)
 const creating = ref(false)
@@ -188,7 +195,7 @@ const detailVisible = ref(false)
 const currentSettlement = ref<any>(null)
 
 const createForm = reactive({ shareholder_id: null as number | null, payment_method: 'wechat', remark: '' })
-const transferForm = reactive({ actual_amount: 0, transaction_no: '', fee_amount: 0, remark: '' })
+const transferForm = reactive({ actual_amount: 0, transaction_no: '', fee_amount: 0, remark: '', transfer_voucher_url: '' })
 
 async function loadData() {
   loading.value = true
@@ -257,6 +264,7 @@ function showTransferDialog(row: any) {
   transferForm.transaction_no = ''
   transferForm.fee_amount = 0
   transferForm.remark = ''
+  transferForm.transfer_voucher_url = ''
   transferDialogVisible.value = true
 }
 

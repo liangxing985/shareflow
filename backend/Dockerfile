@@ -2,14 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    default-libmysqlclient-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装Python依赖
+# 只安装运行时需要的最小依赖（aiomysql是纯Python，不需要编译）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

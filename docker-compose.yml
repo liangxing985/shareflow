@@ -54,12 +54,18 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENV: ${ENV:-production}
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      API_KEYS: ${API_KEYS:-}
+      UPLOAD_DIR: /app/uploads
       TZ: Asia/Shanghai
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
       - backend_logs:/app/logs
+      - uploads_data:/app/uploads
 
   # 前端服务
   frontend:
@@ -79,3 +85,4 @@ volumes:
   mysql_data:
   redis_data:
   backend_logs:
+  uploads_data:

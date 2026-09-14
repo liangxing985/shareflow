@@ -1,5 +1,5 @@
 """订单路由（含API接入）"""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_
 from datetime import datetime, timezone, timedelta
@@ -14,8 +14,19 @@ from app.schemas.order import OrderCreate, OrderApiCreate, OrderUpdate, OrderRes
 from app.schemas.common import PageResponse
 from app.dependencies import get_current_user
 from app.services.share_service import ShareEngine
+from app.core.audit_log import log_operation
+from app.config import settings
 
 router = APIRouter(prefix="/orders", tags=["订单管理"])
+
+
+def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    """API Key鉴权依赖"""
+    if not settings.api_keys_list:
+        raise HTTPException(status_code=500, detail="系统未配置API_KEYS，请联系管理员")
+    if not x_api_key or x_api_key not in settings.api_keys_list:
+        raise HTTPException(status_code=401, detail="无效的API Key")
+    return x_api_key
 
 
 def generate_order_no() -> str:
@@ -160,9 +171,13 @@ async def create_order(
 @router.post("/api/create", response_model=OrderResponse)
 async def api_create_order(
     req: OrderApiCreate,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
 ):
-    """API接入创建订单（业务系统对接，无需登录Token，后续可加API Key鉴权）"""
+    """API接入创建订单（需X-API-Key鉴权）"""
+    client_ip = request.client.host if request.client else ""
+
     # 检查外部订单号重复
     exist = await db.execute(select(Order).where(Order.out_order_no == req.out_order_no))
     if exist.scalar_one_or_none():
@@ -192,6 +207,8 @@ async def api_create_order(
         else:
             order.share_status = "skipped"
 
+    await log_operation(db, None, "api_create_order", "order", order.id,
+                         f"API创建订单 {order.order_no}，金额 {order.total_amount}，IP: {client_ip}", client_ip)
     await db.commit()
     await db.refresh(order)
     return order
