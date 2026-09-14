@@ -7,7 +7,7 @@ import os
 class Settings(BaseSettings):
     # 应用
     APP_NAME: str = "ShareFlow 分账系统"
-    APP_VERSION: str = "1.1.0"
+    APP_VERSION: str = "1.3.1"
     DEBUG: bool = False
     ENV: str = "production"  # production / development
 
@@ -40,6 +40,12 @@ class Settings(BaseSettings):
 
     # 平台抽成默认配置
     DEFAULT_PLATFORM_FEE_RATE: float = 0.10  # 默认平台抽成10%
+
+    # 支付对接（码支付风格API）
+    PAYMENT_APP_ID: str = "shareflow_default"  # 商户ID/AppID
+    PAYMENT_NOTIFY_URL: str = ""  # 默认回调地址（支付成功后回调业务系统）
+    PAYMENT_NOTIFY_RETRY_MAX: int = 3  # 回调最大重试次数
+    PAYMENT_SIGN_ENABLED: bool = True  # 是否启用签名验证
 
     class Config:
         env_file = ".env"

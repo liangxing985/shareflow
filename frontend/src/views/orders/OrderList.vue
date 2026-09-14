@@ -16,6 +16,14 @@
             <el-option label="已跳过" value="skipped" />
           </el-select>
         </el-form-item>
+        <el-form-item label="支付状态">
+          <el-select v-model="query.pay_status" placeholder="全部" clearable style="width: 130px">
+            <el-option label="待支付" value="pending_pay" />
+            <el-option label="待确认" value="pending_confirm" />
+            <el-option label="已支付" value="paid" />
+            <el-option label="已过期" value="expired" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="日期">
           <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始" end-placeholder="结束" value-format="YYYY-MM-DD" style="width: 240px" />
         </el-form-item>
@@ -55,6 +63,11 @@
             <span class="text-warning">¥{{ Number(row.platform_fee || 0).toFixed(2) }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="pay_status" label="支付状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="payStatusType(row.pay_status)" size="small">{{ payStatusText(row.pay_status) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="share_status" label="分账状态" width="100">
           <template #default="{ row }">
             <el-tag :type="shareStatusType(row.share_status)" size="small">{{ shareStatusText(row.share_status) }}</el-tag>
@@ -68,8 +81,10 @@
         <el-table-column prop="created_at" label="创建时间" width="170">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.pay_status === 'pending_pay' || row.pay_status === 'pending_confirm'" link type="success" size="small" @click.stop="confirmPayment(row)">确认收款</el-button>
+            <el-button v-if="row.pay_status === 'pending_pay'" link type="primary" size="small" @click.stop="copyPayLink(row)">复制链接</el-button>
             <el-button link type="primary" size="small" @click.stop="showDetail(row)">详情</el-button>
             <el-button link type="warning" size="small" @click.stop="reshareOrder(row)" :disabled="row.share_status !== 'done'">重新分账</el-button>
           </template>
@@ -180,6 +195,7 @@ const query = reactive({
   keyword: '',
   category: '',
   share_status: '',
+  pay_status: '',
   start_date: '',
   end_date: ''
 })
@@ -226,6 +242,7 @@ function resetQuery() {
   query.keyword = ''
   query.category = ''
   query.share_status = ''
+  query.pay_status = ''
   dateRange.value = []
   query.page = 1
   loadData()
@@ -281,8 +298,59 @@ function shareStatusType(status: string) {
 function shareStatusText(status: string) {
   return { done: '已分账', pending: '待分账', skipped: '已跳过' }[status] || status
 }
+function payStatusType(status: string) {
+  return { paid: 'success', pending_pay: 'warning', pending_confirm: 'warning', expired: 'info', refunded: 'danger' }[status] || 'info'
+}
+function payStatusText(status: string) {
+  return { paid: '已支付', pending_pay: '待支付', pending_confirm: '待确认', expired: '已过期', refunded: '已退款' }[status] || status
+}
 function sourceText(source: string) {
   return { manual: '手动', api: 'API', import: '导入' }[source] || source
+}
+
+async function confirmPayment(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认已收到订单 ${row.order_no} 的 ¥${Number(row.total_amount).toFixed(2)} 吗？确认后将自动分账。`,
+      '确认收款',
+      { type: 'warning', confirmButtonText: '确认收款', cancelButtonText: '取消' }
+    )
+    const res: any = await fetch(`/api/v1/orders/${row.id}/confirm-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('sf_token')}`
+      },
+      body: JSON.stringify({ auto_share: true })
+    })
+    const data = await res.json()
+    if (data.success) {
+      ElMessage.success('确认收款成功，已自动分账')
+      loadData()
+    } else {
+      ElMessage.error(data.detail || '操作失败')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.response?.data?.detail || '操作失败')
+    }
+  }
+}
+
+function copyPayLink(row: any) {
+  const payUrl = `${window.location.origin}/pay/${row.order_no}`
+  navigator.clipboard.writeText(payUrl).then(() => {
+    ElMessage.success('支付链接已复制')
+  }).catch(() => {
+    // 降级方案
+    const textarea = document.createElement('textarea')
+    textarea.value = payUrl
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    ElMessage.success('支付链接已复制')
+  })
 }
 function formatDate(date: string) {
   return date ? dayjs(date).format('YYYY-MM-DD HH:mm:ss') : '-'

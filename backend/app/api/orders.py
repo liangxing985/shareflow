@@ -5,15 +5,17 @@ from sqlalchemy import select, func, or_, and_
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import uuid
+from loguru import logger
 from app.database import get_db
 from app.models.user import User
 from app.models.order import Order
 from app.models.share_record import ShareRecord
 from app.models.share_rule import ShareRule
-from app.schemas.order import OrderCreate, OrderApiCreate, OrderUpdate, OrderResponse, OrderDetailResponse, OrderListRequest
+from app.schemas.order import OrderCreate, OrderApiCreate, OrderUpdate, OrderResponse, OrderDetailResponse, OrderListRequest, AdminConfirmRequest
 from app.schemas.common import PageResponse
 from app.dependencies import get_current_user
 from app.services.share_service import ShareEngine
+from app.services.notify_service import notify_service
 from app.core.audit_log import log_operation
 from app.config import settings
 
@@ -127,13 +129,20 @@ async def create_order(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """手动创建订单"""
+    """手动创建订单（默认已支付，可设置为待支付）"""
     order_no = req.order_no or generate_order_no()
 
     # 检查订单号重复
     exist = await db.execute(select(Order).where(Order.order_no == order_no))
     if exist.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="订单号已存在")
+
+    # 判断是否待支付：如果传了paid_at则视为已支付，否则待支付
+    is_paid = req.paid_at is not None or req.auto_share
+    pay_status = "paid" if is_paid else "pending_pay"
+    pay_expire_at = None
+    if not is_paid:
+        pay_expire_at = datetime.now(timezone.utc) + timedelta(minutes=5)
 
     order = Order(
         order_no=order_no,
@@ -146,7 +155,9 @@ async def create_order(
         product_desc=req.product_desc,
         category=req.category,
         share_rule_id=req.share_rule_id,
-        paid_at=req.paid_at or datetime.now(timezone.utc),
+        pay_status=pay_status,
+        paid_at=req.paid_at or (datetime.now(timezone.utc) if is_paid else None),
+        pay_expire_at=pay_expire_at,
         transaction_id=req.transaction_id,
         remark=req.remark,
         source="manual",
@@ -155,8 +166,8 @@ async def create_order(
     db.add(order)
     await db.flush()
 
-    # 自动分账
-    if req.auto_share:
+    # 自动分账（仅已支付订单）
+    if req.auto_share and is_paid:
         rule = await ShareEngine.get_applicable_rule(db, order)
         if rule:
             await ShareEngine.execute_share(db, order, rule, current_user.id)
@@ -165,7 +176,12 @@ async def create_order(
 
     await db.commit()
     await db.refresh(order)
-    return order
+
+    # 构造返回，添加pay_url
+    result = OrderResponse.model_validate(order).model_dump()
+    if pay_status == "pending_pay":
+        result["pay_url"] = f"/pay/{order.order_no}"
+    return result
 
 
 @router.post("/api/create", response_model=OrderResponse)
@@ -183,6 +199,9 @@ async def api_create_order(
     if exist.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="外部订单号已存在")
 
+    # API创建的订单默认为待支付状态，设置5分钟过期
+    pay_expire_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+
     order = Order(
         order_no=generate_order_no(),
         out_order_no=req.out_order_no,
@@ -193,14 +212,20 @@ async def api_create_order(
         product_desc=req.product_desc,
         category=req.category,
         share_rule_id=req.share_rule_id,
-        paid_at=datetime.now(timezone.utc),
+        pay_status="pending_pay",
+        pay_expire_at=pay_expire_at,
         remark=req.remark,
         source="api",
     )
     db.add(order)
     await db.flush()
 
+    # API创建的订单默认不自动分账，等确认收款后再分账
     if req.auto_share:
+        # 如果显式要求自动分账，则标记为已支付并分账
+        order.pay_status = "paid"
+        order.paid_at = datetime.now(timezone.utc)
+        order.pay_expire_at = None
         rule = await ShareEngine.get_applicable_rule(db, order)
         if rule:
             await ShareEngine.execute_share(db, order, rule)
@@ -211,7 +236,12 @@ async def api_create_order(
                          f"API创建订单 {order.order_no}，金额 {order.total_amount}，IP: {client_ip}", client_ip)
     await db.commit()
     await db.refresh(order)
-    return order
+
+    # 构造返回，添加pay_url
+    result = OrderResponse.model_validate(order).model_dump()
+    if req.return_pay_url and order.pay_status == "pending_pay":
+        result["pay_url"] = f"/pay/{order.order_no}"
+    return result
 
 
 @router.put("/{order_id}", response_model=OrderResponse)
@@ -308,3 +338,142 @@ async def order_stats(
         "today_orders": today_orders,
         "today_amount": float(today_amount),
     }
+
+
+# ============ 支付页面相关API（公开访问，不需要登录）============
+
+@router.get("/pay/{order_no}")
+async def get_payment_page(
+    order_no: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取支付页面信息（公开访问）"""
+    result = await db.execute(select(Order).where(Order.order_no == order_no))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    # 检查是否已过期
+    now = datetime.now(timezone.utc)
+    if order.pay_expire_at and now > order.pay_expire_at and order.pay_status == "pending_pay":
+        order.pay_status = "expired"
+        await db.commit()
+
+    # 获取所有启用的收款账户（微信+支付宝）
+    from app.models.payment_account import PaymentAccount
+    accounts_result = await db.execute(
+        select(PaymentAccount).where(PaymentAccount.status == "active").order_by(PaymentAccount.is_default.desc(), PaymentAccount.id)
+    )
+    accounts = accounts_result.scalars().all()
+
+    payment_accounts = [
+        {
+            "id": a.id,
+            "platform": a.platform,
+            "account_name": a.account_name,
+            "qr_code_url": a.qr_code_url,
+        }
+        for a in accounts
+    ]
+
+    return {
+        "order_no": order.order_no,
+        "total_amount": float(order.total_amount),
+        "product_name": order.product_name,
+        "payer_name": order.payer_name,
+        "pay_status": order.pay_status,
+        "pay_expire_at": order.pay_expire_at.isoformat() if order.pay_expire_at else None,
+        "payment_accounts": payment_accounts,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+    }
+
+
+@router.post("/pay/{order_no}/confirm")
+async def payer_confirm_payment(
+    order_no: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """客户点击"我已支付"（公开访问）"""
+    result = await db.execute(select(Order).where(Order.order_no == order_no))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    if order.pay_status not in ["pending_pay", "pending_confirm"]:
+        raise HTTPException(status_code=400, detail=f"当前订单状态为{order.pay_status}，无法确认支付")
+
+    # 检查是否已过期
+    now = datetime.now(timezone.utc)
+    if order.pay_expire_at and now > order.pay_expire_at:
+        order.pay_status = "expired"
+        await db.commit()
+        raise HTTPException(status_code=400, detail="支付链接已过期，请重新下单")
+
+    client_ip = request.client.host if request.client else ""
+    order.pay_status = "pending_confirm"
+    order.payer_confirm_at = now
+    order.pay_expire_at = None  # 客户确认后取消过期时间
+
+    await log_operation(db, None, "payer_confirm_payment", "order", order.id,
+                         f"客户确认已支付，IP: {client_ip}", client_ip)
+    await db.commit()
+
+    return {"success": True, "message": "已确认支付，等待商家确认收款", "pay_status": "pending_confirm"}
+
+
+# ============ 管理员确认收款（需要登录）============
+
+@router.post("/{order_id}/confirm-payment")
+async def admin_confirm_payment(
+    order_id: int,
+    req: AdminConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """管理员确认收款（确认后自动分账）"""
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+
+    if order.pay_status not in ["pending_pay", "pending_confirm"]:
+        raise HTTPException(status_code=400, detail=f"当前订单状态为{order.pay_status}，无法确认收款")
+
+    now = datetime.now(timezone.utc)
+    order.pay_status = "paid"
+    order.paid_at = now
+    order.pay_expire_at = None
+    if req.transaction_id:
+        order.transaction_id = req.transaction_id
+
+    # 确认收款后自动分账
+    if req.auto_share and order.share_status == "pending":
+        rule = await ShareEngine.get_applicable_rule(db, order)
+        if rule:
+            await ShareEngine.execute_share(db, order, rule, current_user.id)
+        else:
+            order.share_status = "skipped"
+
+    await log_operation(db, current_user, "admin_confirm_payment", "order", order.id,
+                         f"管理员确认收款，订单金额 {order.total_amount}", "")
+    await db.commit()
+    await db.refresh(order)
+
+    # 确认收款后，后台异步发送支付回调通知到业务系统
+    if settings.PAYMENT_NOTIFY_URL:
+        try:
+            # 预提取订单数据，避免后台任务访问detached的SQLAlchemy对象
+            order_data = {
+                "order_no": str(order.order_no),
+                "out_order_no": str(order.out_order_no or ""),
+                "total_amount": f"{float(order.total_amount):.2f}",
+                "paid_at": order.paid_at.strftime("%Y-%m-%d %H:%M:%S") if order.paid_at else "",
+                "transaction_id": str(order.transaction_id or ""),
+            }
+            notify_service.send_payment_notify_background(order_data)
+            logger.info(f"订单 {order.order_no} 已触发支付回调通知")
+        except Exception as e:
+            logger.error(f"订单 {order.order_no} 触发支付回调失败: {str(e)[:200]}")
+
+    return {"success": True, "message": "确认收款成功", "order": OrderResponse.model_validate(order).model_dump()}

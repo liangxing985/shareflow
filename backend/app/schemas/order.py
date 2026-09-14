@@ -34,7 +34,8 @@ class OrderApiCreate(BaseModel):
     payer_contact: Optional[str] = None
     share_rule_id: Optional[int] = None
     remark: Optional[str] = None
-    auto_share: bool = True
+    auto_share: bool = False  # API创建的订单默认不自动分账，等确认收款后再分账
+    return_pay_url: bool = True  # 是否返回支付链接
 
 
 class OrderUpdate(BaseModel):
@@ -65,10 +66,12 @@ class OrderResponse(BaseModel):
     share_status: str
     pay_status: str
     paid_at: Optional[datetime] = None
+    pay_expire_at: Optional[datetime] = None
     transaction_id: Optional[str] = None
     source: str
     remark: Optional[str] = None
     created_at: datetime
+    pay_url: Optional[str] = None  # 支付链接（仅创建订单时返回）
 
     class Config:
         from_attributes = True
@@ -90,3 +93,35 @@ class OrderListRequest(BaseModel):
     end_date: Optional[str] = None
     min_amount: Optional[Decimal] = None
     max_amount: Optional[Decimal] = None
+
+
+class PaymentAccountInfo(BaseModel):
+    """支付页面的收款账户信息"""
+    id: int
+    platform: str  # wechat / alipay
+    account_name: str
+    qr_code_url: Optional[str] = None
+
+
+class PaymentPageResponse(BaseModel):
+    """支付页面信息"""
+    order_no: str
+    total_amount: Decimal
+    product_name: Optional[str] = None
+    payer_name: Optional[str] = None
+    pay_status: str
+    pay_expire_at: Optional[datetime] = None
+    payment_accounts: List[PaymentAccountInfo] = []
+    created_at: datetime
+
+
+class PayerConfirmRequest(BaseModel):
+    """客户确认支付请求"""
+    remark: Optional[str] = None
+
+
+class AdminConfirmRequest(BaseModel):
+    """管理员确认收款请求"""
+    transaction_id: Optional[str] = None
+    remark: Optional[str] = None
+    auto_share: bool = True  # 确认收款后是否自动分账

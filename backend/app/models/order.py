@@ -32,9 +32,11 @@ class Order(Base):
     shared_at = Column(DateTime(timezone=True), nullable=True, comment="分账完成时间")
 
     # 支付信息
-    pay_status = Column(String(20), default="paid", comment="支付状态: pending/paid/refunded")
+    pay_status = Column(String(20), default="pending_pay", comment="支付状态: pending_pay(待支付)/pending_confirm(待确认收款)/paid(已支付)/expired(已过期)/refunded(已退款)")
     paid_at = Column(DateTime(timezone=True), nullable=True, comment="支付时间")
+    pay_expire_at = Column(DateTime(timezone=True), nullable=True, comment="支付链接过期时间")
     transaction_id = Column(String(100), nullable=True, comment="微信/支付宝交易号")
+    payer_confirm_at = Column(DateTime(timezone=True), nullable=True, comment="客户点击已支付时间")
 
     # 来源
     source = Column(String(50), default="manual", comment="来源: manual(手动录入)/api(API接入)/import(批量导入)")

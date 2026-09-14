@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '登录', requiresAuth: false }
   },
   {
+    path: '/pay/:orderNo',
+    name: 'Payment',
+    component: () => import('@/views/pay/PaymentPage.vue'),
+    meta: { title: '订单支付', requiresAuth: false }
+  },
+  {
     path: '/',
     component: () => import('@/layouts/DefaultLayout.vue'),
     redirect: '/dashboard',
